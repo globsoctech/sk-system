@@ -46,6 +46,26 @@ export function glazingToHole(g: GlazingUnit, pad = 0.01): UvRect {
   }
 }
 
-export function holesForWall(glazing: GlazingUnit[], wall: WallId): UvRect[] {
-  return glazing.filter((g) => g.wall === wall).map((g) => glazingToHole(g))
+function rectsOverlap(a: UvRect, b: UvRect) {
+  return a.u0 < b.u1 && a.u1 > b.u0 && a.v0 < b.v1 && a.v1 > b.v0
+}
+
+/** Front facade holes must not carve into the gate leaf */
+export function holesForWall(
+  glazing: GlazingUnit[],
+  wall: WallId,
+  gate?: { width: number; height: number } | null,
+): UvRect[] {
+  let holes = glazing.filter((g) => g.wall === wall).map((g) => glazingToHole(g))
+  if (wall === 'front' && gate) {
+    const gap = 0.25
+    const gateRect: UvRect = {
+      u0: -gate.width / 2 - gap,
+      u1: gate.width / 2 + gap,
+      v0: 0,
+      v1: gate.height + gap,
+    }
+    holes = holes.filter((h) => !rectsOverlap(h, gateRect))
+  }
+  return holes
 }

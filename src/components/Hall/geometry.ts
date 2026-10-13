@@ -125,7 +125,14 @@ export function buildWallsOnly(config: HallConfig, glazing: GlazingUnit[] = []) 
 
     const frontHoles =
       wall === 'front'
-        ? [...holesForWall(glazing, 'front'), ...gateHole]
+        ? [
+            ...holesForWall(
+              glazing,
+              'front',
+              config.showGate !== false ? { width: gw, height: gh } : null,
+            ),
+            ...gateHole,
+          ]
         : holesForWall(glazing, wall)
 
     emitPunchedWall(

@@ -111,13 +111,15 @@ function overlaps(
   return a0 < b1 && a1 > b0
 }
 
+type ClampResult = { along: number; y: number; w: number; h: number }
+
 /** Keep unit fully inside facade / gate; front windows never cover the gate leaf */
 export function clampGlazing(
   unit: Pick<GlazingUnit, 'wall' | 'along' | 'y' | 'w' | 'h'>,
   dims: ClampDims | number,
   widthArg?: number,
   wallHeightArg?: number,
-): { along: number; y: number } {
+): ClampResult {
   const dimsObj: ClampDims =
     typeof dims === 'number'
       ? {
@@ -131,69 +133,92 @@ export function clampGlazing(
       : dims
 
   const margin = 0.2
+  let w = unit.w
+  let h = unit.h
+
   if (unit.wall === 'gate') {
     const half = dimsObj.gateWidth / 2
-    const maxAlong = Math.max(0, half - unit.w / 2 - margin)
-    const minY = unit.h / 2 + margin
-    const maxY = Math.max(minY, dimsObj.gateHeight - unit.h / 2 - margin)
+    const maxAlong = Math.max(0, half - w / 2 - margin)
+    const minY = h / 2 + margin
+    const maxY = Math.max(minY, dimsObj.gateHeight - h / 2 - margin)
     return {
       along: Math.min(maxAlong, Math.max(-maxAlong, unit.along)),
       y: Math.min(maxY, Math.max(minY, unit.y)),
+      w,
+      h,
     }
   }
 
   const halfAlong =
     unit.wall === 'left' || unit.wall === 'right' ? dimsObj.length / 2 : dimsObj.width / 2
-  const maxAlong = Math.max(0, halfAlong - unit.w / 2 - margin)
-  const minY = unit.h / 2 + margin
-  const maxY = Math.max(minY, dimsObj.wallHeight - unit.h / 2 - margin)
 
-  let along = Math.min(maxAlong, Math.max(-maxAlong, unit.along))
-  let y = Math.min(maxY, Math.max(minY, unit.y))
-
-  // Front facade: keep clear of gate rectangle
-  if (unit.wall === 'front' && dimsObj.showGate !== false) {
-    const gw = dimsObj.gateWidth
-    const gh = dimsObj.gateHeight
-    const gap = 0.15
-    const gx0 = -gw / 2 - gap
-    const gx1 = gw / 2 + gap
-    const gy0 = 0
-    const gy1 = gh + gap
-
-    const resolve = () => {
-      const wx0 = along - unit.w / 2
-      const wx1 = along + unit.w / 2
-      const wy0 = y - unit.h / 2
-      const wy1 = y + unit.h / 2
-      if (!overlaps(wx0, wx1, gx0, gx1) || !overlaps(wy0, wy1, gy0, gy1)) return
-
-      // Prefer push left/right; if no room, push above gate
-      const leftTarget = gx0 - unit.w / 2
-      const rightTarget = gx1 + unit.w / 2
-      const canLeft = leftTarget >= -maxAlong
-      const canRight = rightTarget <= maxAlong
-
-      if (along <= 0 && canLeft) {
-        along = leftTarget
-      } else if (canRight) {
-        along = rightTarget
-      } else if (canLeft) {
-        along = leftTarget
-      } else {
-        y = Math.min(maxY, Math.max(minY, gy1 + unit.h / 2))
-      }
-
-      along = Math.min(maxAlong, Math.max(-maxAlong, along))
-      y = Math.min(maxY, Math.max(minY, y))
+  const fit = (ww: number, hh: number, alongIn: number, yIn: number) => {
+    const maxA = Math.max(0, halfAlong - ww / 2 - margin)
+    const minY = hh / 2 + margin
+    const maxY = Math.max(minY, dimsObj.wallHeight - hh / 2 - margin)
+    return {
+      along: Math.min(maxA, Math.max(-maxA, alongIn)),
+      y: Math.min(maxY, Math.max(minY, yIn)),
+      maxA,
+      minY,
+      maxY,
     }
-
-    resolve()
-    // Second pass if still overlapping after vertical move
-    resolve()
   }
 
-  return { along, y }
+  let { along, y, maxA } = fit(w, h, unit.along, unit.y)
+
+  // Front facade: never intersect the gate leaf (under / through the gate)
+  if (unit.wall === 'front' && dimsObj.showGate !== false) {
+    const gap = 0.25
+    const gx0 = -dimsObj.gateWidth / 2 - gap
+    const gx1 = dimsObj.gateWidth / 2 + gap
+    const gy1 = dimsObj.gateHeight + gap
+    // Max width fully on one side: right edge ≤ gx0 (or left ≥ gx1)
+    const maxSideW = Math.max(0.6, halfAlong - margin + gx0 - 0.02)
+
+    const xHitsGate = (ww: number, a: number) =>
+      overlaps(a - ww / 2, a + ww / 2, gx0, gx1)
+
+    const hitsGate = (ww: number, hh: number, a: number, yy: number) =>
+      xHitsGate(ww, a) && overlaps(yy - hh / 2, yy + hh / 2, 0, gy1)
+
+    const parkBeside = (ww: number, preferLeft: boolean) => {
+      const leftTarget = gx0 - ww / 2
+      const rightTarget = gx1 + ww / 2
+      const fitted = fit(ww, h, preferLeft ? leftTarget : rightTarget, y)
+      const tryLeft = fit(ww, h, leftTarget, y)
+      const tryRight = fit(ww, h, rightTarget, y)
+      const leftOk = !xHitsGate(ww, tryLeft.along)
+      const rightOk = !xHitsGate(ww, tryRight.along)
+      if (preferLeft && leftOk) return tryLeft
+      if (!preferLeft && rightOk) return tryRight
+      if (leftOk) return tryLeft
+      if (rightOk) return tryRight
+      return fitted
+    }
+
+    if (hitsGate(w, h, along, y)) {
+      const preferLeft = along <= 0
+
+      // 1) Move fully beside (keep size)
+      ;({ along, y, maxA } = parkBeside(w, preferLeft))
+
+      // 2) Too wide for the side strip → shrink width, stay beside
+      if (xHitsGate(w, along)) {
+        w = Math.min(w, maxSideW)
+        ;({ along, y, maxA } = parkBeside(w, preferLeft))
+      }
+
+      // 3) Only if still in the gate column → lift above (may shrink height)
+      if (xHitsGate(w, along) && hitsGate(w, h, along, y)) {
+        const maxHAbove = Math.max(0.5, dimsObj.wallHeight - margin - gy1)
+        if (h > maxHAbove) h = maxHAbove
+        ;({ along, y } = fit(w, h, along, gy1 + h / 2))
+      }
+    }
+  }
+
+  return { along, y, w, h }
 }
 
 function hallDims(state: {
@@ -257,7 +282,8 @@ function seedGlazing(): GlazingUnit[] {
     mk('right', -2, 1.8, 'window'),
     mk('right', 4, 4.2, 'window'),
     mk('right', 9, 3.0, 'ribbon'),
-    mk('front', -4, 3.0, 'office'),
+    // Front: keep clear of gate (±2 m + gap) — place to the left of gate
+    mk('front', -5.5, 3.2, 'office', { w: 3.2, h: 3.8 }),
     mk('gate', 0, 2.8, 'window', { w: 1.2, h: 0.9 }),
   ]
 }
@@ -281,10 +307,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
     const state = get()
     const dims = hallDims(state)
     set({
-      glazing: state.glazing.map((g) => {
-        const c = clampGlazing(g, dims)
-        return { ...g, ...c }
-      }),
+      glazing: state.glazing.map((g) => ({ ...g, ...clampGlazing(g, dims) })),
     })
   },
   addGlazing: (partial = {}) => {
@@ -292,9 +315,14 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
     const { w, h } = defaultSize(type)
     const wall = partial.wall ?? 'right'
     const state = get()
-    const along = partial.along ?? 0
     const sizeW = partial.w ?? (wall === 'gate' ? Math.min(w, 1.4) : w)
     const sizeH = partial.h ?? (wall === 'gate' ? Math.min(h, 1.0) : h)
+    // Front: spawn beside the gate, never on the leaf
+    const along =
+      partial.along ??
+      (wall === 'front' && state.showGate
+        ? -(state.gateWidth / 2 + sizeW / 2 + 0.4)
+        : 0)
     const y0 =
       partial.y ??
       (wall === 'gate' ? Math.min(state.gateHeight * 0.65, state.gateHeight - 0.5) : state.wallHeight * 0.5)
@@ -307,8 +335,6 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
       id,
       wall,
       type,
-      w: sizeW,
-      h: sizeH,
       ...clamped,
     }
     set({ glazing: [...state.glazing, unit], selectedGlazingId: id })
@@ -319,9 +345,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
     set({
       glazing: state.glazing.map((g) => {
         if (g.id !== id) return g
-        const next = { ...g, ...patch }
-        const c = clampGlazing(next, hallDims(state))
-        return { ...next, ...c }
+        return { ...g, ...patch, ...clampGlazing({ ...g, ...patch }, hallDims(state)) }
       }),
     })
   },
