@@ -159,13 +159,10 @@ export function clampGlazing(
     return {
       along: Math.min(maxA, Math.max(-maxA, alongIn)),
       y: Math.min(maxY, Math.max(minY, yIn)),
-      maxA,
-      minY,
-      maxY,
     }
   }
 
-  let { along, y, maxA } = fit(w, h, unit.along, unit.y)
+  let { along, y } = fit(w, h, unit.along, unit.y)
 
   // Front facade: never intersect the gate leaf (under / through the gate)
   if (unit.wall === 'front' && dimsObj.showGate !== false) {
@@ -201,12 +198,12 @@ export function clampGlazing(
       const preferLeft = along <= 0
 
       // 1) Move fully beside (keep size)
-      ;({ along, y, maxA } = parkBeside(w, preferLeft))
+      ;({ along, y } = parkBeside(w, preferLeft))
 
       // 2) Too wide for the side strip → shrink width, stay beside
       if (xHitsGate(w, along)) {
         w = Math.min(w, maxSideW)
-        ;({ along, y, maxA } = parkBeside(w, preferLeft))
+        ;({ along, y } = parkBeside(w, preferLeft))
       }
 
       // 3) Only if still in the gate column → lift above (may shrink height)
