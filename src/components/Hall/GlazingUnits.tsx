@@ -236,15 +236,16 @@ export function GlazingUnits() {
       ))}
 
       {showSkylight && roofType === 'gable' && (
-        <mesh position={[0, ridgeY, 0]} rotation={[0, 0, Math.PI / 2]}>
-          <planeGeometry args={[length * 0.9, 0.8]} />
+        // Thin box along ridge (X = width of strip, Z = hall length) — never a vertical plane
+        <mesh position={[0, ridgeY, 0]}>
+          <boxGeometry args={[0.85, 0.04, length * 0.9]} />
           <meshPhysicalMaterial
             color="#eaf6fc"
             transmission={0.85}
             roughness={0.12}
             transparent
             depthWrite={false}
-            side={THREE.FrontSide}
+            side={THREE.DoubleSide}
           />
         </mesh>
       )}
